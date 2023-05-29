@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+    <channel>
+        <title></title>
+        <link>undefined</link>
+        <description>undefined</description>
+        <lastBuildDate>Mon, 29 May 2023 10:53:46 GMT</lastBuildDate>
+        <docs>https://validator.w3.org/feed/docs/rss2.html</docs>
+        <generator>Joplin Pages Publisher</generator>
+        <item>
+            <title><![CDATA[Creating a trusted CA and SAN certificate using OpenSSL – Fabian Lee : Software Engineer]]></title>
+            <guid>2c4bc7d80a5f414fbbff1c934a0cb794</guid>
+            <pubDate>Sat, 26 Feb 2022 09:15:15 GMT</pubDate>
+            <content:encoded><![CDATA[<p><a>Networking</a><br />
+<a title="https://fabianlee.org/" href="https://fabianlee.org/">Fabian Lee : Software Engineer</a></p>
+<h1 id="creating-a-trusted-ca-and-san-certificate-using-openssl">Creating a trusted CA and SAN certificate using OpenSSL</h1>
+<h2 id="overview">Overview</h2>
+<p>If you are familiar with commercial certificates, you know that a certificate does not live in isolation.  It it just the beginning of a chain of trust, where the root certificate is ultimately trusted because it sits on your local system.</p>
+<p>We can create a SAN certificate with the same features, issued and signed by a Certificate Authority that <em>we create</em>.   This has several benefits:</p>
+<ol>
+<li>Better emulation of production – production certs also consist of a chain</li>
+<li>Ease of administration – once a user trusts our CA, then any other SAN certificate we generate will also be trusted</li>
+<li>Better browser support – not all browsers allow self-signed certs to be added into the trusted root authorities list</li>
+</ol>
+<p>In this article, first we will create our own CA (Certificate Authority).  Then we will use that CA to create a SAN server certificate that covers  “mydomain.com” as well as any of its subdomains, “*.mydomain.com”.</p>
+<p>If you want to test the certs we generate here, I would recommend using HAProxy.  Here is a page where I <a title="https://fabianlee.org/2017/02/21/haproxy-using-haproxy-for-ssl-termination-on-ubuntu/" href="https://fabianlee.org/2017/02/21/haproxy-using-haproxy-for-ssl-termination-on-ubuntu/">describe how to do a quick HAProxy install</a>.</p>
+<h2 id="prerequisite">Prerequisite</h2>
+<p>As a prerequisite, ensure the SSL packages are installed:</p>
+<div><pre class="hljs"><code>$ sudo apt-<span class="hljs-built_in">get</span> install libssl1.0.0  -y</code></pre></div>
+<h3 id="customized-opensslcnf">Customized openssl.cnf</h3>
+<p>The first step is to grab the openssl.cnf template available on your system.  On Ubuntu this can be found at “/usr/lib/ssl/openssl.cnf”.  You may find this in “/System/Library/OpenSSL/” on MacOS, and “/etc/pki/tls” on Redhat variants.</p>
+<div><pre class="hljs"><code>export prefix=<span class="hljs-string">"mydomain"</span> cp <span class="hljs-regexp">/usr/</span>lib<span class="hljs-regexp">/ssl/</span>openssl.cnf <span class="hljs-variable">$prefix</span>.cnf</code></pre></div>
+<p>“$prefix.cnf” needs be modified with the specific information about the cert we are going to generate.</p>
+<p>Under the [ v3_ca ] section, add the following values.  For the CA, this signifies we are creating a CA that will be used for key signing.</p>
+<div><pre class="hljs"><code><span class="hljs-section">[ v3_ca ]</span> <span class="hljs-attr">subjectKeyIdentifier</span>=hash
+<span class="hljs-attr">authorityKeyIdentifier</span>=keyid:always,issuer
+<span class="hljs-attr">basicConstraints</span> = critical, CA:<span class="hljs-literal">TRUE</span>, pathlen:<span class="hljs-number">3</span> keyUsage = critical, cRLSign, keyCertSign
+<span class="hljs-attr">nsCertType</span> = sslCA, emailCA</code></pre></div>
+<p>Then under the “[ v3_req ]” section, set the following along with all the valid alternative names for this certificate.</p>
+<div><pre class="hljs"><code><span class="hljs-section">[ v3_req ]</span> <span class="hljs-attr">basicConstraints</span> = CA:<span class="hljs-literal">FALSE</span>
+<span class="hljs-attr">keyUsage</span> = nonRepudiation, digitalSignature, keyEncipherment <span class="hljs-comment">#extendedKeyUsage=serverAuth subjectAltName =  @alt_names  [ alt_names ] DNS.1  =  `mydomain.com` DNS.2  =  `*.dydomain.com`</span></code></pre></div>
+<p>Also uncomment the following line under the “[ req ]” section so that certificate requests are created with v3 extensions.</p>
+<div><pre class="hljs"><code><span class="hljs-attr">req_extensions</span> = v3_req</code></pre></div>
+<p>When we generate each type of key, we specify which extension section we want to use, which is why we can share $prefix.cnf for creating both the CA as well as the SAN certificate.</p>
+<h3 id="create-ca-certificate">Create CA certificate</h3>
+<p>Now we will start using OpenSSL to create the necessary keys and certificates. First generate the private/public RSA key pair:</p>
+<div><pre class="hljs"><code>openssl genrsa -aes256 -<span class="hljs-keyword">out</span> ca.<span class="hljs-keyword">key</span>.pem 2048 chmod 400 ca.<span class="hljs-keyword">key</span>.pem</code></pre></div>
+<p>This encodes the key file using an passphrase based on AES256.  Then we need to create the self-signed root CA certificate.</p>
+<div><pre class="hljs"><code>openssl req -<span class="hljs-keyword">new</span>  -x509 -subj <span class="hljs-string">"/CN=myca"</span>  `-extensions v3_ca`  -days <span class="hljs-number">3650</span>  -key <span class="hljs-keyword">ca</span>.key.pem -<span class="hljs-built_in">sha256</span> -out <span class="hljs-keyword">ca</span>.pem -config $prefix.<span class="hljs-keyword">cnf</span></code></pre></div>
+<p>You can verify this root CA certificate using:</p>
+<div><pre class="hljs"><code>openssl x509 -<span class="hljs-keyword">in</span> ca.pem -<span class="hljs-built_in">text</span> -noout</code></pre></div>
+<p>This will show the root CA certificate, and the ‘Issuer’ and ‘Subject’ will be the same since this is self-signed. This is flagged as “CA:TRUE” meaning it will be recognized as a root CA certificate; meaning browsers and OS will allow it to be imported into their trusted root certificate store.</p>
+<div><pre class="hljs"><code>Issuer:  <span class="hljs-string">`CN=myca`</span>  <span class="hljs-params">...</span>  Subject:  <span class="hljs-string">`CN=myca`</span>  <span class="hljs-params">...</span> X509v3 Basic  Constraints: critical <span class="hljs-string">`CA:TRUE,`</span> pathlen:<span class="hljs-number">3</span> X509v3 Key  Usage: critical Certificate  Sign, CRL Sign  Netscape  Cert  <span class="hljs-keyword">Type</span>: SSL CA, S/MIME CA</code></pre></div>
+<h3 id="create-server-certificate-signed-by-ca">Create Server certificate signed by CA</h3>
+<p>With the root CA now created, we switch over to the server certificate.  First generate the private/public RSA key pair:</p>
+<div><pre class="hljs"><code>openssl genrsa -out <span class="hljs-variable">$prefix</span><span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> <span class="hljs-number">2048</span></code></pre></div>
+<p>We didn’t put a passphrase on this key simply because the CA is more valuable target and we can always regenerate the server cert, but feel free to take this extra precaution.</p>
+<p>Then create the server cert signing request:</p>
+<div><pre class="hljs"><code>openssl req -subj <span class="hljs-string">"/CN=$prefix"</span>  `-extensions v3_req`  -sha256 -<span class="hljs-built_in">new</span>  -<span class="hljs-built_in">key</span> $<span class="hljs-built_in">prefix</span>.<span class="hljs-built_in">key</span>.pem -out $<span class="hljs-built_in">prefix</span>.csr</code></pre></div>
+<p>Then generate the server certificate using the: server signing request, the CA signing key, and CA cert.</p>
+<div><pre class="hljs"><code>openssl x509 -req `-extensions v3_req`  -days <span class="hljs-number">3650</span>  -sha256 -<span class="hljs-keyword">in</span> <span class="hljs-variable">$prefix</span><span class="hljs-selector-class">.csr</span> -CA ca<span class="hljs-selector-class">.pem</span> -CAkey ca<span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> -CAcreateserial  -out <span class="hljs-variable">$prefix</span><span class="hljs-selector-class">.crt</span> -extfile <span class="hljs-variable">$prefix</span>.cnf</code></pre></div>
+<p>The “<span><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mi>r</mi><mi>e</mi><mi>f</mi><mi>i</mi><mi>x</mi><mi mathvariant="normal">.</mi><mi>k</mi><mi>e</mi><mi>y</mi><mi mathvariant="normal">.</mi><mi>p</mi><mi>e</mi><mi>m</mi><mtext>”</mtext><mi>i</mi><mi>s</mi><mi>t</mi><mi>h</mi><mi>e</mi><mi>s</mi><mi>e</mi><mi>r</mi><mi>v</mi><mi>e</mi><mi>r</mi><mi>p</mi><mi>r</mi><mi>i</mi><mi>v</mi><mi>a</mi><mi>t</mi><mi>e</mi><mi>k</mi><mi>e</mi><mi>y</mi><mi>a</mi><mi>n</mi><mi>d</mi><mtext>“</mtext></mrow><annotation encoding="application/x-tex">prefix.key.pem” is the server private key and “</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8888799999999999em;vertical-align:-0.19444em"></span><span class="mord mathnormal">p</span><span class="mord mathnormal">re</span><span class="mord mathnormal" style="margin-right:0.10764em">f</span><span class="mord mathnormal">i</span><span class="mord mathnormal">x</span><span class="mord">.</span><span class="mord mathnormal" style="margin-right:0.03148em">k</span><span class="mord mathnormal" style="margin-right:0.03588em">ey</span><span class="mord">.</span><span class="mord mathnormal">p</span><span class="mord mathnormal">e</span><span class="mord mathnormal">m</span><span class="mord">”</span><span class="mord mathnormal">i</span><span class="mord mathnormal">s</span><span class="mord mathnormal">t</span><span class="mord mathnormal">h</span><span class="mord mathnormal" style="margin-right:0.02778em">eser</span><span class="mord mathnormal" style="margin-right:0.03588em">v</span><span class="mord mathnormal" style="margin-right:0.02778em">er</span><span class="mord mathnormal">p</span><span class="mord mathnormal" style="margin-right:0.02778em">r</span><span class="mord mathnormal">i</span><span class="mord mathnormal" style="margin-right:0.03588em">v</span><span class="mord mathnormal">a</span><span class="mord mathnormal">t</span><span class="mord mathnormal">e</span><span class="mord mathnormal" style="margin-right:0.03148em">k</span><span class="mord mathnormal" style="margin-right:0.03588em">ey</span><span class="mord mathnormal">an</span><span class="mord mathnormal">d</span><span class="mord">“</span></span></span></span></span>prefix.crt” is the server certificate.  Verify the certificate:</p>
+<div><pre class="hljs"><code>openssl <span class="hljs-keyword">x</span><span class="hljs-number">509</span> -in $<span class="hljs-keyword">prefix</span>.crt -text -noout</code></pre></div>
+<p>This will show the certificate, and the ‘Issuer’ will be the CA name, while the Subject is the prefix.  This is not set to be a CA, and the ‘Subject Alternative Name’ field contains the URLs that will be considered valid by browsers.</p>
+<div><pre class="hljs"><code>Issuer:  <span class="hljs-string">` CN=myca`</span>  <span class="hljs-params">...</span>  Subject:  <span class="hljs-string">` CN=mydomain`</span>  <span class="hljs-params">...</span> X509v3 Basic  Constraints:  <span class="hljs-string">` CA:FALSE`</span> X509v3 Key  Usage:  Digital  Signature,  Non  Repudiation,  Key  Encipherment X509v3 Subject  Alternative  Name:  <span class="hljs-string">`DNS:mydomain.com, DNS:*.mydomain.com`</span></code></pre></div>
+<h3 id="server-deployment">Server deployment</h3>
+<p>Servers like HAProxy want the full chain of certs along with private key (server certificate+CA cert+server private key).  While Windows IIS wants a .pfx file.  Here is how you would generate those files.</p>
+<div><pre class="hljs"><code>cat <span class="hljs-variable">$prefix</span><span class="hljs-selector-class">.crt</span> ca<span class="hljs-selector-class">.pem</span> <span class="hljs-variable">$prefix</span><span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> &gt; <span class="hljs-variable">$prefix</span>-ca-full<span class="hljs-selector-class">.pem</span>
+
+openssl pkcs12 -export  -out <span class="hljs-variable">$prefix</span><span class="hljs-selector-class">.pfx</span> -inkey <span class="hljs-variable">$prefix</span><span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> -<span class="hljs-keyword">in</span> <span class="hljs-variable">$prefix</span><span class="hljs-selector-class">.crt</span> -certfile ca.pem</code></pre></div>
+<h3 id="browser-evaluation">Browser Evaluation</h3>
+<p>When you first point Chrome or Firefox at the site with your SAN cert with CA signing, it will throw the same type of exceptions as a self-signed SAN cert.  This is because the root CA cert is not known as a trusted source for signed certificates.</p>
+<p>In Chrome settings (chrome://settings), search for “certificates” and click on “Manage Certificates”.  On Windows this will open the Windows certificate manager and you should import the “ca.pem” file at the “Trusted Root Certification Authorities” tab.  This is equivalent to adding it through mmc.exe, in the “local user” trusted root store (not the computer level).  On Linux, Chrome manages its own certificate store and again you should import “ca.pem” into the “Authorities” tab.  This should now make the security icon turn green.</p>
+<p>In Firefox Options (about:preferences), search for “certificates” and click “View Certificates”.  Go to the “Authorities” tab and import “ca.pem”.  Check the box to have it trust websites, and now the lock icon should turn green when you visit the page.</p>
+<p>Although there is a little friction doing this import, it is a one-time cost because any other certificates that you sign with this CA are now trusted.  So if a cert expires and you have to replace it, or you need to change the URLs in a SAN and refresh it, none of the browsers will have an issue with trust.</p>
+]]></content:encoded>
+        </item>
+    </channel>
+</rss>

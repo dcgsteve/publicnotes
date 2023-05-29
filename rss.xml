@@ -4,9 +4,162 @@
         <title></title>
         <link>undefined</link>
         <description>undefined</description>
-        <lastBuildDate>Mon, 29 May 2023 10:53:46 GMT</lastBuildDate>
+        <lastBuildDate>Mon, 29 May 2023 10:59:20 GMT</lastBuildDate>
         <docs>https://validator.w3.org/feed/docs/rss2.html</docs>
         <generator>Joplin Pages Publisher</generator>
+        <item>
+            <title><![CDATA[Kubernetes]]></title>
+            <guid>5adf1db4a9214f52832252def724f9b1</guid>
+            <pubDate>Tue, 09 May 2023 09:17:10 GMT</pubDate>
+            <content:encoded><![CDATA[<h1 id="kubernetes-increase-disk-size-in-a-stateful-set">kubernetes - increase disk size in a stateful set</h1>
+<p>Based on comments on <a title="https://github.com/kubernetes/kubernetes/issues/68737" href="https://github.com/kubernetes/kubernetes/issues/68737">https://github.com/kubernetes/kubernetes/issues/68737</a></p>
+<ol>
+<li><code>kubectl edit pvc &lt;name&gt;</code> for each PVC in the StatefulSet, to increase its capacity.</li>
+<li><code>kubectl delete sts --cascade=orphan &lt;name&gt;</code> to delete the StatefulSet and leave its pods.</li>
+<li><code>kubectl apply -f &lt;name&gt;</code> to recreate the StatefulSet.</li>
+<li><code>kubectl rollout restart sts &lt;name&gt;</code> to restart the pods, one at a time. During restart, the pod's PVC will be resized</li>
+</ol>
+<h1 id="uninstall-k3s-untested">Uninstall K3S (untested)</h1>
+<div><pre class="hljs"><code><span class="hljs-meta">#!/bin/sh</span>
+
+<span class="hljs-built_in">set</span> -x
+
+systemctl stop k3s
+systemctl <span class="hljs-built_in">disable</span> k3s
+systemctl daemon-reload
+
+rm -f /etc/systemd/system/k3s.service
+rm -f /usr/<span class="hljs-built_in">local</span>/bin/k3s
+
+<span class="hljs-keyword">if</span> [ -L /usr/<span class="hljs-built_in">local</span>/bin/kubectl ]; <span class="hljs-keyword">then</span>
+    rm -f /usr/<span class="hljs-built_in">local</span>/bin/kubectl
+<span class="hljs-keyword">fi</span>
+<span class="hljs-keyword">if</span> [ -L /usr/<span class="hljs-built_in">local</span>/bin/crictl ]; <span class="hljs-keyword">then</span>
+    rm -f /usr/<span class="hljs-built_in">local</span>/bin/crictl
+<span class="hljs-keyword">fi</span>
+<span class="hljs-keyword">if</span> [ -e /sys/fs/cgroup/systemd/system.slice/k3s.service/cgroup.procs ]; <span class="hljs-keyword">then</span>
+    <span class="hljs-built_in">kill</span> -9 `cat /sys/fs/cgroup/systemd/system.slice/k3s.service/cgroup.procs`
+<span class="hljs-keyword">fi</span>
+umount `cat /proc/self/mounts | awk <span class="hljs-string">'{print $2}'</span> | grep <span class="hljs-string">'^/run/k3s'</span>`
+umount `cat /proc/self/mounts | awk <span class="hljs-string">'{print $2}'</span> | grep <span class="hljs-string">'^/var/lib/rancher/k3s'</span>`
+
+rm -rf /var/lib/rancher/k3s
+rm -rf /etc/rancher/k3s
+
+rm -f /usr/<span class="hljs-built_in">local</span>/bin/k3s-uninstall.s</code></pre></div>
+<h1 id="new-service-account">New service account</h1>
+<div><pre class="hljs"><code>sudo kubectl <span class="hljs-keyword">create</span> serviceaccount vault-deployer -n <span class="hljs-keyword">default</span></code></pre></div>
+<h1 id="https-redirect-middlewares">HTTPS redirect middlewares</h1>
+<div><pre class="hljs"><code><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">traefik.containo.us/v1alpha1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Middleware</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">redirect-https</span>
+  <span class="hljs-attr">namespace:</span> <span class="hljs-string">kube-system</span>
+<span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">redirectScheme:</span>
+    <span class="hljs-attr">permanent:</span> <span class="hljs-literal">true</span>
+    <span class="hljs-attr">scheme:</span> <span class="hljs-string">https</span></code></pre></div>
+<h1 id="kubernetes-shortcuts">Kubernetes shortcuts</h1>
+<p>componentstatuses = cs<br />
+configmaps = cm<br />
+endpoints = ep<br />
+events = ev<br />
+limitranges = limits<br />
+namespaces = ns<br />
+nodes = no<br />
+persistentvolumeclaims = pvc<br />
+persistentvolumes = pv<br />
+pods = po<br />
+replicationcontrollers = rc<br />
+resourcequotas = quota<br />
+serviceaccounts = sa<br />
+services = svc<br />
+customresourcedefinitions = crd, crds<br />
+daemonsets = ds<br />
+deployments = deploy<br />
+replicasets = rs<br />
+statefulsets = sts<br />
+horizontalpodautoscalers = hpa<br />
+cronjobs = cj<br />
+certificiaterequests = cr, crs<br />
+certificates = cert, certs<br />
+certificatesigningrequests = csr<br />
+ingresses = ing<br />
+networkpolicies = netpol<br />
+podsecuritypolicies = psp<br />
+replicasets = rs<br />
+scheduledscalers = ss<br />
+priorityclasses = pc<br />
+storageclasses = sc</p>
+<h1 id="internal-load-balancer-for-gcp">Internal load balancer for GCP</h1>
+<p>I think this is working but may need tweaking - decided not to go this route in the end due to DNS limitations on the setup I was using</p>
+<div><pre class="hljs"><code>resource <span class="hljs-string">"google_compute_instance_group"</span> <span class="hljs-string">"c1-ig"</span> {
+  <span class="hljs-attr">name</span>         = <span class="hljs-string">"<span class="hljs-subst">${var.REF}</span>-c1-ig"</span>
+  <span class="hljs-attr">instances</span> = [
+    google_compute_instance.c1[<span class="hljs-number">0</span>].self_link,
+    google_compute_instance.c1[<span class="hljs-number">1</span>].self_link,
+    google_compute_instance.c1[<span class="hljs-number">2</span>].self_link,
+    google_compute_instance.c1[<span class="hljs-number">3</span>].self_link,
+    google_compute_instance.c1[<span class="hljs-number">4</span>].self_link,
+  ]
+
+  <span class="hljs-attr">zone</span> = var.zone
+}
+
+
+resource <span class="hljs-string">"google_compute_region_backend_service"</span> <span class="hljs-string">"c1-backend"</span> {
+  <span class="hljs-attr">name</span>         = <span class="hljs-string">"<span class="hljs-subst">${var.REF}</span>-c1-backend"</span>
+  <span class="hljs-attr">health_checks</span> = [google_compute_health_check.tcp-k3s.self_link]
+  <span class="hljs-attr">region</span>        = var.region
+
+  backend {
+    <span class="hljs-attr">group</span> = google_compute_instance_group.c1-ig.self_link
+  }
+}
+
+resource <span class="hljs-string">"google_compute_forwarding_rule"</span> <span class="hljs-string">"c1-int-lb"</span> {
+  <span class="hljs-attr">name</span>         = <span class="hljs-string">"<span class="hljs-subst">${var.REF}</span>-c1-int-lb"</span>
+  <span class="hljs-attr">load_balancing_scheme</span> = <span class="hljs-string">"INTERNAL"</span>
+  <span class="hljs-attr">ports</span>                 = [<span class="hljs-string">"80"</span>,<span class="hljs-string">"443"</span>]
+  <span class="hljs-attr">network</span>               = google_compute_network.net1.self_link
+  <span class="hljs-attr">backend_service</span>       = google_compute_region_backend_service.c1-backend.self_link
+}
+
+resource <span class="hljs-string">"google_compute_firewall"</span> <span class="hljs-string">"allow-int-lb"</span> {
+  <span class="hljs-attr">name</span>         = <span class="hljs-string">"<span class="hljs-subst">${var.REF}</span>-allow-int-lb"</span>
+  <span class="hljs-attr">network</span> = google_compute_network.net1.name
+
+  allow {
+    <span class="hljs-attr">protocol</span> = <span class="hljs-string">"tcp"</span>
+    <span class="hljs-attr">ports</span>    = [<span class="hljs-string">"80"</span>, <span class="hljs-string">"443"</span>]
+  }
+
+  <span class="hljs-attr">source_ranges</span> = [google_compute_forwarding_rule.c1-int-lb.ip_address]
+  <span class="hljs-attr">target_tags</span>   = [<span class="hljs-string">"int-lb"</span>]
+}
+</code></pre></div>
+<h1 id="kubeconfig">KUBECONFIG</h1>
+<p>For K3S</p>
+<p><code>export KUBECONFIG=/etc/rancher/k3s/k3s.yaml</code></p>
+<h1 id="destroy-rogue-namespace">Destroy rogue namespace</h1>
+<p>(On node!)</p>
+<div><pre class="hljs"><code><span class="hljs-attribute">NAMESPACE</span>=your-rogue-namespace
+kubectl<span class="hljs-built_in"> proxy </span>&amp;
+kubectl <span class="hljs-built_in">get</span> namespace <span class="hljs-variable">$NAMESPACE</span> -o json |jq <span class="hljs-string">'.spec = {"finalizers":[]}'</span> &gt;temp.json
+curl -k -H <span class="hljs-string">"Content-Type: application/json"</span> -X PUT --data-binary @temp.json 127.0.0.1:8001/api/v1/namespaces/<span class="hljs-variable">$NAMESPACE</span>/finalize</code></pre></div>
+]]></content:encoded>
+        </item>
+        <item>
+            <title><![CDATA[Traefik Kubernetes]]></title>
+            <guid>1be49d9ba3fe42209dcd07691cb404ff</guid>
+            <pubDate>Fri, 20 May 2022 12:38:02 GMT</pubDate>
+            <content:encoded><![CDATA[<p>On cmsee.live currently:</p>
+<p>You can add middlewares such as:</p>
+<div><pre class="hljs"><code>traefik.ingress.kubernetes.io/router.middlewares:
+  kube-<span class="hljs-keyword">system</span>-redirect-https@kubernetescrd
+  kube-<span class="hljs-keyword">system</span>-traefik-forward-auth@kubernetescrd</code></pre></div>
+]]></content:encoded>
+        </item>
         <item>
             <title><![CDATA[Creating a trusted CA and SAN certificate using OpenSSL – Fabian Lee : Software Engineer]]></title>
             <guid>2c4bc7d80a5f414fbbff1c934a0cb794</guid>
